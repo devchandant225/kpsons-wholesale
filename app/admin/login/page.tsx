@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ShieldCheck, Lock, Mail, ArrowRight, Loader2 } from 'lucide-react';
+import { readJson } from '@/lib/read-json';
 
 export default function AdminLoginPage() {
   const router = useRouter();
@@ -23,7 +24,7 @@ export default function AdminLoginPage() {
         body: JSON.stringify({ email, password }),
       });
 
-      const data = await res.json();
+      const data = await readJson(res);
 
       if (!res.ok || !data.ok) {
         throw new Error(data.error || 'Invalid credentials');

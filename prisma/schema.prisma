@@ -78,3 +78,14 @@ model WholesaleApplication {
   @@index([createdAt])
   @@map("wholesale_applications")
 }
+
+// Admin API token from the one-time Shopify OAuth install (/api/shopify/install).
+model ShopifyToken {
+  shop        String   @id
+  accessToken String   @map("access_token")
+  scope       String   @default("")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("shopify_tokens")
+}

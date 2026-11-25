@@ -28,7 +28,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     if (!shopifyResult.success) {
       return NextResponse.json(
         { ok: false, error: `Shopify sync failed: ${shopifyResult.error}. Account was not approved.` },
-        { status: 502 }
+        { status: 424 }
       );
     }
 

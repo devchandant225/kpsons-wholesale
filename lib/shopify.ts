@@ -1,10 +1,14 @@
 import { IWholesaleApplication } from '@/types';
+import { prisma } from '@/lib/db';
 
 const SHOPIFY_STORE_DOMAIN = process.env.SHOPIFY_STORE_DOMAIN || 'ujwt36-mq.myshopify.com';
-// Auth, either:
-//  - SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET (Dev Dashboard app): the app fetches a
-//    short-lived token with the client credentials grant and renews it automatically, or
-//  - SHOPIFY_ADMIN_ACCESS_TOKEN (shpat_..., legacy custom app made in the store admin).
+// Admin API auth, tried in this order:
+//  1. A token saved by the one-time OAuth install ("Connect Shopify" on the admin
+//     dashboard, /api/shopify/install). Needed when the Dev Dashboard app isn't in
+//     the store's own organization (e.g. you're a collaborator).
+//  2. SHOPIFY_ADMIN_ACCESS_TOKEN (shpat_..., legacy custom app made in the store admin).
+//  3. SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET via the client credentials grant
+//     (only works when the app and store are in the same organization).
 const SHOPIFY_CLIENT_ID = process.env.SHOPIFY_CLIENT_ID;
 const SHOPIFY_CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET;
 const SHOPIFY_ADMIN_ACCESS_TOKEN = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN;
@@ -12,6 +16,7 @@ const SHOPIFY_ADMIN_ACCESS_TOKEN = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN;
 const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || '2026-10';
 
 const WHOLESALE_TAGS = ['wholesale', 'b2b-approved', 'tax-exempt'];
+const CONNECT_HINT = 'Click "Connect Shopify" on the admin dashboard to (re)connect the store.';
 
 export interface CreateShopifyCustomerResult {
   success: boolean;
@@ -22,7 +27,32 @@ export interface CreateShopifyCustomerResult {
 const apiUrl = (p: string) => `https://${SHOPIFY_STORE_DOMAIN}/admin/api/${SHOPIFY_API_VERSION}/${p}`;
 
 const hasClientCredentials = () => !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET);
-const isShopifyConfigured = () => hasClientCredentials() || !!SHOPIFY_ADMIN_ACCESS_TOKEN;
+
+async function getStoredToken() {
+  return prisma.shopifyToken.findUnique({ where: { shop: SHOPIFY_STORE_DOMAIN } });
+}
+
+/** For the admin dashboard: is Shopify usable, and how. */
+export async function getShopifyConnection() {
+  const stored = await getStoredToken().catch(() => null);
+  const method = stored
+    ? 'oauth'
+    : SHOPIFY_ADMIN_ACCESS_TOKEN
+    ? 'token'
+    : hasClientCredentials()
+    ? 'client_credentials'
+    : null;
+  return {
+    shop: SHOPIFY_STORE_DOMAIN,
+    method,
+    // Client credentials can't be confirmed without trying, so only a stored
+    // or static token counts as definitely connected.
+    connected: method === 'oauth' || method === 'token',
+    canConnect: hasClientCredentials(),
+    scope: stored?.scope || '',
+    connectedAt: stored?.updatedAt || null,
+  };
+}
 
 // Cached client-credentials token (one per process).
 let cachedToken: { value: string; expiresAt: number } | null = null;
@@ -41,7 +71,9 @@ async function requestClientCredentialsToken(): Promise<string> {
   const data = await res.json().catch(() => ({}));
   if (!res.ok || !data.access_token) {
     throw new Error(
-      `Could not get a Shopify access token (${res.status}): ${JSON.stringify(data.error_description || data.error || data.errors || data)}`
+      `Could not get a Shopify access token (${res.status}): ${JSON.stringify(
+        data.error_description || data.error || data.errors || data
+      )}. ${CONNECT_HINT}`
     );
   }
   // Renew 5 minutes early. Shopify sends expires_in in seconds (about 24 hours).
@@ -50,8 +82,7 @@ async function requestClientCredentialsToken(): Promise<string> {
   return data.access_token;
 }
 
-async function getAccessToken(forceRefresh = false): Promise<string> {
-  if (!hasClientCredentials()) return SHOPIFY_ADMIN_ACCESS_TOKEN!;
+async function getClientCredentialsToken(forceRefresh = false): Promise<string> {
   if (!forceRefresh && cachedToken && cachedToken.expiresAt > Date.now()) return cachedToken.value;
   // Share one in-flight request between concurrent callers.
   if (!pendingToken) {
@@ -60,6 +91,15 @@ async function getAccessToken(forceRefresh = false): Promise<string> {
     });
   }
   return pendingToken;
+}
+
+type Auth = { token: string; kind: 'oauth' | 'token' | 'client_credentials' };
+
+async function getAuth(forceRefresh = false): Promise<Auth> {
+  const stored = await getStoredToken();
+  if (stored) return { token: stored.accessToken, kind: 'oauth' };
+  if (SHOPIFY_ADMIN_ACCESS_TOKEN) return { token: SHOPIFY_ADMIN_ACCESS_TOKEN, kind: 'token' };
+  return { token: await getClientCredentialsToken(forceRefresh), kind: 'client_credentials' };
 }
 
 async function shopifyFetch(p: string, init: RequestInit = {}) {
@@ -73,11 +113,17 @@ async function shopifyFetch(p: string, init: RequestInit = {}) {
       },
     });
 
-  let res = await send(await getAccessToken());
-  // Token revoked or expired early: get a fresh one and retry once.
-  if (res.status === 401 && hasClientCredentials()) {
-    cachedToken = null;
-    res = await send(await getAccessToken(true));
+  let auth = await getAuth();
+  let res = await send(auth.token);
+  if (res.status === 401) {
+    if (auth.kind === 'client_credentials') {
+      // Expired early: get a fresh one and retry once.
+      cachedToken = null;
+      auth = await getAuth(true);
+      res = await send(auth.token);
+    } else if (auth.kind === 'oauth') {
+      throw new Error(`Shopify rejected the saved access token (app uninstalled or revoked). ${CONNECT_HINT}`);
+    }
   }
   const data = await res.json().catch(() => ({}));
   return { res, data };
@@ -99,7 +145,7 @@ function toE164(phone?: string): string | undefined {
 export async function createApprovedShopifyCustomer(
   application: IWholesaleApplication
 ): Promise<CreateShopifyCustomerResult> {
-  if (!isShopifyConfigured()) {
+  if (!hasClientCredentials() && !SHOPIFY_ADMIN_ACCESS_TOKEN && !(await getStoredToken().catch(() => null))) {
     if (process.env.NODE_ENV === 'production') {
       return {
         success: false,

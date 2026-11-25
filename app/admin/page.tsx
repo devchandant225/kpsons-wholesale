@@ -12,9 +12,11 @@ import {
   ExternalLink,
   Building2,
   RefreshCw,
-  AlertCircle
+  AlertCircle,
+  Link2
 } from 'lucide-react';
 import { IWholesaleApplication } from '@/types';
+import { readJson } from '@/lib/read-json';
 
 export default function AdminDashboardPage() {
   const router = useRouter();
@@ -23,6 +25,21 @@ export default function AdminDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('PENDING');
   const [search, setSearch] = useState('');
+  const [shopify, setShopify] = useState<{
+    connected: boolean;
+    canConnect: boolean;
+    method: string | null;
+    shop: string;
+  } | null>(null);
+
+  useEffect(() => {
+    fetch('/api/shopify/status')
+      .then((res) => readJson(res))
+      .then((data) => {
+        if (data.ok) setShopify(data);
+      })
+      .catch(() => {});
+  }, []);
 
   const fetchApplications = async () => {
     setLoading(true);
@@ -37,7 +54,7 @@ export default function AdminDashboardPage() {
         return;
       }
 
-      const data = await res.json();
+      const data = await readJson(res);
       if (data.ok) {
         setApplications(data.applications || []);
         if (data.counts) setCounts(data.counts);
@@ -76,6 +93,37 @@ export default function AdminDashboardPage() {
           <span>Refresh</span>
         </button>
       </div>
+
+      {/* Shopify connection */}
+      {shopify && !shopify.connected && (
+        <div className="p-4 bg-amber-50 border border-amber-300 rounded-xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex items-start gap-2 text-sm text-amber-900">
+            <AlertCircle className="w-5 h-5 flex-shrink-0 text-amber-600" />
+            <span>
+              <strong>Shopify isn&apos;t connected.</strong> Approving an application needs access to {shopify.shop}.
+              {!shopify.canConnect && ' Set SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET in .env first.'}
+            </span>
+          </div>
+          {shopify.canConnect && (
+            <a
+              href="/api/shopify/install"
+              className="inline-flex items-center justify-center gap-1.5 bg-[#123f28] hover:bg-[#0b2a1a] text-white px-4 py-2 rounded-lg text-sm font-bold transition shadow-sm whitespace-nowrap"
+            >
+              <Link2 className="w-4 h-4" />
+              <span>Connect Shopify</span>
+            </a>
+          )}
+        </div>
+      )}
+      {shopify && shopify.connected && shopify.method === 'oauth' && (
+        <div className="text-xs text-slate-500 flex items-center gap-1.5">
+          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+          <span>Shopify connected ({shopify.shop}).</span>
+          <a href="/api/shopify/install" className="font-semibold text-[#123f28] hover:underline">
+            Reconnect
+          </a>
+        </div>
+      )}
 
       {/* Metric Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

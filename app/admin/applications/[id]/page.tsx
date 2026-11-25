@@ -20,6 +20,7 @@ import {
   Trash2
 } from 'lucide-react';
 import { IWholesaleApplication } from '@/types';
+import { readJson } from '@/lib/read-json';
 
 export default function ApplicationDetailPage({ params }: { params: { id: string } }) {
   const router = useRouter();
@@ -45,7 +46,7 @@ export default function ApplicationDetailPage({ params }: { params: { id: string
         router.push('/admin/login');
         return;
       }
-      const data = await res.json();
+      const data = await readJson(res);
       if (data.ok && data.application) {
         setApp(data.application);
         setAssignedSalesRep(data.application.assignedSalesRep || '');
@@ -74,7 +75,7 @@ export default function ApplicationDetailPage({ params }: { params: { id: string
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ assignedSalesRep, adminNotes }),
       });
-      const data = await res.json();
+      const data = await readJson(res);
       if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to save notes');
       setSuccess('Internal notes and sales rep updated successfully.');
     } catch (err: any) {
@@ -97,7 +98,7 @@ export default function ApplicationDetailPage({ params }: { params: { id: string
       const res = await fetch(`/api/admin/applications/${params.id}/approve`, {
         method: 'POST',
       });
-      const data = await res.json();
+      const data = await readJson(res);
       if (!res.ok || !data.ok) throw new Error(data.error || 'Approval failed');
 
       setSuccess(data.message || 'Application approved and customer synced to Shopify!');
@@ -120,7 +121,7 @@ export default function ApplicationDetailPage({ params }: { params: { id: string
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason: rejectReason }),
       });
-      const data = await res.json();
+      const data = await readJson(res);
       if (!res.ok || !data.ok) throw new Error(data.error || 'Rejection failed');
 
       setShowRejectModal(false);
@@ -155,7 +156,7 @@ export default function ApplicationDetailPage({ params }: { params: { id: string
         router.push('/admin/login');
         return;
       }
-      const data = await res.json();
+      const data = await readJson(res);
       if (!res.ok || !data.ok) throw new Error(data.error || 'Delete failed');
       router.push('/admin');
     } catch (err: any) {
