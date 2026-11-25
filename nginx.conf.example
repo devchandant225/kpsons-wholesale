@@ -6,8 +6,8 @@
 server {
     server_name auth.kpsonswholesale.com;
 
-    # Allow license and document uploads up to 50MB
-    client_max_body_size 50M;
+    # Up to four 15MB documents per application
+    client_max_body_size 64M;
 
     # Gzip Compression
     gzip on;

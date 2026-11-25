@@ -97,6 +97,9 @@ export async function POST(request: NextRequest) {
       {
         ok: true,
         token,
+        // The theme stores this in localStorage and sends it as a Bearer token
+        // (the cookie isn't sent when the app is on a different site).
+        sessionToken: token,
         customer: {
           id: application.id,
           email: application.email,

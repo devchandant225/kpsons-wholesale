@@ -5,8 +5,12 @@
 const buckets = new Map<string, { count: number; resetAt: number }>();
 
 export function clientIp(request: Request): string {
+  // nginx sets X-Real-IP to the real client address. X-Forwarded-For's first entry
+  // comes from the client and can be faked, so it is only a fallback.
+  const real = request.headers.get('x-real-ip');
+  if (real) return real.trim();
   const fwd = request.headers.get('x-forwarded-for');
-  return (fwd ? fwd.split(',')[0] : request.headers.get('x-real-ip') || 'unknown').trim();
+  return (fwd ? fwd.split(',').pop() || 'unknown' : 'unknown').trim();
 }
 
 /** Returns true when the request is allowed, false when over the limit. */

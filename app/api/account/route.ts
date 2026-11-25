@@ -31,13 +31,19 @@ export async function GET(request: NextRequest) {
   try {
     const app = await prisma.wholesaleApplication.findUnique({ where: { id: payload.id } });
 
-    if (!app) {
-      return jsonResponse({ loggedIn: false }, 404, origin);
+    // Same rule as /api/session: only approved accounts count as logged in.
+    if (!app || app.status !== 'APPROVED') {
+      return jsonResponse({ loggedIn: false }, 401, origin);
     }
 
     return jsonResponse(
       {
         loggedIn: true,
+        // Top-level fields read by the theme's wholesale-account section.
+        email: app.email,
+        businessName: app.businessName,
+        // Order history isn't wired up yet; the theme shows "no orders".
+        orders: [],
         account: {
           id: app.id,
           email: app.email,

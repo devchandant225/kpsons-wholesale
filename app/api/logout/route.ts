@@ -20,3 +20,6 @@ export async function POST(request: NextRequest) {
 
   return response;
 }
+
+// The theme's logout button sends a GET.
+export const GET = POST;
