@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma, serializeApplication, isNotFound } from '@/lib/db';
+import { prisma, serializeApplication, isNotFound, readDocuments } from '@/lib/db';
+import { deleteStoredFiles } from '@/lib/file-storage';
 import { checkAdminAuth, isValidId } from '@/lib/admin-auth';
 
 const notFound = () => NextResponse.json({ ok: false, error: 'Application not found' }, { status: 404 });
@@ -38,5 +39,36 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     if (isNotFound(error)) return notFound();
     console.error('Failed to update application:', error);
     return NextResponse.json({ ok: false, error: 'Failed to update application' }, { status: 500 });
+  }
+}
+
+/**
+ * Permanently deletes an application / wholesale account and its uploaded
+ * documents. ADMIN staff only (not REP). The Shopify customer, if one was
+ * created on approval, is left in Shopify (it may have orders).
+ */
+export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
+  const admin = checkAdminAuth(request);
+  if (!admin) {
+    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
+  }
+  if (admin.role !== 'ADMIN') {
+    return NextResponse.json({ ok: false, error: 'Only admins can delete accounts.' }, { status: 403 });
+  }
+  if (!isValidId(params.id)) return notFound();
+
+  try {
+    const row = await prisma.wholesaleApplication.delete({ where: { id: params.id } });
+    await deleteStoredFiles(Object.values(readDocuments(row.documents)));
+    console.log(`🗑️ Application ${row.id} (${row.email}) deleted by ${admin.email}`);
+    return NextResponse.json({
+      ok: true,
+      message: `${row.businessName} (${row.email}) was deleted.`,
+      shopifyCustomerId: row.shopifyCustomerId || null,
+    });
+  } catch (error: any) {
+    if (isNotFound(error)) return notFound();
+    console.error('Failed to delete application:', error);
+    return NextResponse.json({ ok: false, error: 'Failed to delete account' }, { status: 500 });
   }
 }

@@ -16,7 +16,8 @@ import {
   Eye,
   AlertTriangle,
   Loader2,
-  Save
+  Save,
+  Trash2
 } from 'lucide-react';
 import { IWholesaleApplication } from '@/types';
 
@@ -128,6 +129,37 @@ export default function ApplicationDetailPage({ params }: { params: { id: string
     } catch (err: any) {
       setError(err.message);
     } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!app) return;
+    const shopifyNote = app.shopifyCustomerId
+      ? '\n\nTheir Shopify customer record is NOT deleted; remove it in Shopify Admin if needed.'
+      : '';
+    if (
+      !window.confirm(
+        `Permanently delete ${app.businessName} (${app.email})?\n\nThis removes the account, its login and all uploaded documents. It cannot be undone.${shopifyNote}`
+      )
+    ) {
+      return;
+    }
+
+    setActionLoading(true);
+    setError('');
+    setSuccess('');
+    try {
+      const res = await fetch(`/api/admin/applications/${params.id}`, { method: 'DELETE' });
+      if (res.status === 401) {
+        router.push('/admin/login');
+        return;
+      }
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Delete failed');
+      router.push('/admin');
+    } catch (err: any) {
+      setError(err.message);
       setActionLoading(false);
     }
   };
@@ -480,6 +512,22 @@ export default function ApplicationDetailPage({ params }: { params: { id: string
             >
               <Save className="w-4 h-4" />
               <span>Save Notes</span>
+            </button>
+          </div>
+
+          {/* Danger zone */}
+          <div className="bg-white rounded-xl border border-red-200 p-6 shadow-sm space-y-3">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-red-700">Danger Zone</h3>
+            <p className="text-xs text-slate-500">
+              Permanently delete this account, its storefront login and uploaded documents.
+            </p>
+            <button
+              onClick={handleDelete}
+              disabled={actionLoading}
+              className="w-full bg-white border border-red-300 text-red-700 hover:bg-red-50 text-xs font-bold py-2.5 rounded-lg flex items-center justify-center gap-1.5 transition disabled:opacity-60"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>Delete Account</span>
             </button>
           </div>
 
