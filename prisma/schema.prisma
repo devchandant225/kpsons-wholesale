@@ -1,0 +1,80 @@
+// PostgreSQL schema for the KP Wholesale auth app.
+// Apply on the server with:  npx prisma migrate deploy
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ApplicationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  NEEDS_INFO
+}
+
+enum AdminRole {
+  ADMIN
+  REP
+}
+
+model AdminUser {
+  id           String    @id @default(uuid()) @db.Uuid
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  name         String
+  role         AdminRole @default(ADMIN)
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  @@map("admin_users")
+}
+
+model WholesaleApplication {
+  id            String @id @default(uuid()) @db.Uuid
+  email         String @unique
+  passwordHash  String @map("password_hash")
+  businessName  String @map("business_name")
+  dba           String @default("")
+  businessPhone String @default("") @map("business_phone")
+
+  // Business address
+  addressLine1  String @map("address_line1")
+  addressLine2  String @default("") @map("address_line2")
+  city          String
+  state         String
+  postalCode    String @map("postal_code")
+  country       String @default("US")
+
+  // Billing address
+  billingSameAsBusiness Boolean @default(true) @map("billing_same_as_business")
+  billingName           String  @default("") @map("billing_name")
+  billingLine1          String  @default("") @map("billing_line1")
+  billingLine2          String  @default("") @map("billing_line2")
+  billingCity           String  @default("") @map("billing_city")
+  billingState          String  @default("") @map("billing_state")
+  billingPostalCode     String  @default("") @map("billing_postal_code")
+  billingCountry        String  @default("US") @map("billing_country")
+
+  // { tobaccoLicense, salesTaxLicense, feinForm, hempLicense }: each a DocumentMeta or null
+  documents Json @default("{}")
+
+  status            ApplicationStatus @default(PENDING)
+  shopifyCustomerId String?           @map("shopify_customer_id")
+  assignedSalesRep  String            @default("") @map("assigned_sales_rep")
+  adminNotes        String            @default("") @map("admin_notes")
+  rejectionReason   String            @default("") @map("rejection_reason")
+  reviewedBy        String?           @map("reviewed_by")
+  reviewedAt        DateTime?         @map("reviewed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("wholesale_applications")
+}

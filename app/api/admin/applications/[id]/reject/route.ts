@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { connectToDatabase } from '@/lib/mongodb';
-import { WholesaleApplication } from '@/models/WholesaleApplication';
+import { prisma, serializeApplication, isNotFound } from '@/lib/db';
 import { checkAdminAuth, isValidId } from '@/lib/admin-auth';
 import { sendApplicationRejectedEmail } from '@/lib/email';
 
@@ -17,34 +16,33 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const body = await request.json().catch(() => ({}));
     const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 2000) : '';
 
-    await connectToDatabase();
-    const application = await WholesaleApplication.findById(params.id);
-
-    if (!application) {
-      return NextResponse.json({ ok: false, error: 'Application not found' }, { status: 404 });
-    }
-
-    application.status = 'REJECTED';
-    application.rejectionReason = reason || 'Documentation verification failed.';
-    application.reviewedBy = admin.email;
-    application.reviewedAt = new Date();
-    await application.save();
+    const updated = await prisma.wholesaleApplication.update({
+      where: { id: params.id },
+      data: {
+        status: 'REJECTED',
+        rejectionReason: reason || 'Documentation verification failed.',
+        reviewedBy: admin.email,
+        reviewedAt: new Date(),
+      },
+    });
 
     // Note: if this account was approved before, its Shopify customer keeps its
     // wholesale tags. Storefront access is still revoked because /api/session
     // only treats APPROVED applications as logged in.
-    sendApplicationRejectedEmail(application.email, application.businessName, application.rejectionReason).catch(
-      (err) => console.error('Failed to send rejection email:', err)
+    sendApplicationRejectedEmail(updated.email, updated.businessName, updated.rejectionReason).catch((err) =>
+      console.error('Failed to send rejection email:', err)
     );
 
-    const { passwordHash, ...safe } = application.toObject();
     return NextResponse.json({
       ok: true,
       message: 'Application marked as rejected and notification email sent.',
-      application: safe,
+      application: serializeApplication(updated),
     });
   } catch (error: any) {
+    if (isNotFound(error)) {
+      return NextResponse.json({ ok: false, error: 'Application not found' }, { status: 404 });
+    }
     console.error('Rejection error:', error);
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: false, error: 'Rejection failed' }, { status: 500 });
   }
 }

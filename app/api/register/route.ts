@@ -1,12 +1,12 @@
 import { NextRequest } from 'next/server';
-import { connectToDatabase } from '@/lib/mongodb';
-import { WholesaleApplication } from '@/models/WholesaleApplication';
+import { Prisma } from '@prisma/client';
+import { prisma, isUniqueViolation, readDocuments, EMPTY_DOCUMENTS } from '@/lib/db';
 import { hashPassword, verifyCsrfToken } from '@/lib/auth';
 import { saveUploadedFile, deleteStoredFiles } from '@/lib/file-storage';
 import { handleOptions, jsonResponse } from '@/lib/cors';
 import { sendAdminNewApplicationNotification } from '@/lib/email';
 import { clientIp, rateLimit } from '@/lib/rate-limit';
-import { DocumentMeta } from '@/types';
+import { ApplicationDocuments, DocumentMeta } from '@/types';
 
 export async function OPTIONS(request: NextRequest) {
   return handleOptions(request);
@@ -103,8 +103,10 @@ export async function POST(request: NextRequest) {
     }
 
     // 3. Existing application with this email? Rejected applicants may re-apply.
-    await connectToDatabase();
-    const existing = await WholesaleApplication.findOne({ email });
+    const existing = await prisma.wholesaleApplication.findUnique({
+      where: { email },
+      select: { id: true, status: true, documents: true },
+    });
     if (existing && existing.status !== 'REJECTED') {
       const msg =
         existing.status === 'APPROVED'
@@ -114,9 +116,10 @@ export async function POST(request: NextRequest) {
     }
 
     // 4. Validate & store documents
-    const documents: Record<string, DocumentMeta> = {};
+    // List every slot so a re-application doesn't keep an old document.
+    const documents: ApplicationDocuments = { ...EMPTY_DOCUMENTS };
     try {
-      const uploads: [string, File | null, string][] = [
+      const uploads: [keyof ApplicationDocuments, File | null, string][] = [
         ['tobaccoLicense', tobaccoFile, 'tobacco'],
         ['salesTaxLicense', salesTaxFile, 'salestax'],
         ['feinForm', feinFile, 'fein'],
@@ -124,8 +127,9 @@ export async function POST(request: NextRequest) {
       ];
       for (const [key, file, prefix] of uploads) {
         if (!file) continue;
-        documents[key] = await saveUploadedFile(file, prefix);
-        saved.push(documents[key]);
+        const meta = await saveUploadedFile(file, prefix);
+        documents[key] = meta;
+        saved.push(meta);
       }
     } catch (uploadError: any) {
       await deleteStoredFiles(saved);
@@ -140,19 +144,21 @@ export async function POST(request: NextRequest) {
       businessName,
       dba,
       businessPhone,
-      address: { line1: addressLine1, line2: addressLine2, city, state, postalCode, country },
-      billing: {
-        sameAsBusiness: billingSame,
-        name: billingSame ? businessName : billingName,
-        line1: billingSame ? addressLine1 : billingLine1,
-        line2: billingSame ? addressLine2 : billingLine2,
-        city: billingSame ? city : billingCity,
-        state: billingSame ? state : billingState,
-        postalCode: billingSame ? postalCode : billingPostal,
-        country: billingSame ? country : billingCountry,
-      },
-      // List every slot so a re-application doesn't keep an old document.
-      documents: { tobaccoLicense: null, salesTaxLicense: null, feinForm: null, hempLicense: null, ...documents } as any,
+      addressLine1,
+      addressLine2,
+      city,
+      state,
+      postalCode,
+      country,
+      billingSameAsBusiness: billingSame,
+      billingName: billingSame ? businessName : billingName,
+      billingLine1: billingSame ? addressLine1 : billingLine1,
+      billingLine2: billingSame ? addressLine2 : billingLine2,
+      billingCity: billingSame ? city : billingCity,
+      billingState: billingSame ? state : billingState,
+      billingPostalCode: billingSame ? postalCode : billingPostal,
+      billingCountry: billingSame ? country : billingCountry,
+      documents: documents as unknown as Prisma.InputJsonObject,
       status: 'PENDING' as const,
       rejectionReason: '',
       reviewedBy: null,
@@ -160,13 +166,12 @@ export async function POST(request: NextRequest) {
     };
 
     if (existing) {
-      // Re-application after rejection: replace the old documents.
-      const oldDocs = Object.values(existing.toObject().documents || {}) as (DocumentMeta | undefined)[];
-      existing.set(data);
-      await existing.save();
+      // Re-application after rejection: replace the old record and documents.
+      const oldDocs = Object.values(readDocuments(existing.documents));
+      await prisma.wholesaleApplication.update({ where: { id: existing.id }, data });
       await deleteStoredFiles(oldDocs);
     } else {
-      await new WholesaleApplication(data).save();
+      await prisma.wholesaleApplication.create({ data });
     }
     saved = [];
 
@@ -185,7 +190,7 @@ export async function POST(request: NextRequest) {
     );
   } catch (error: any) {
     await deleteStoredFiles(saved);
-    if (error?.code === 11000) {
+    if (isUniqueViolation(error)) {
       // Two submissions with the same email raced each other.
       return jsonResponse(
         { ok: false, errors: ['An application with this email is already on file and under review.'] },

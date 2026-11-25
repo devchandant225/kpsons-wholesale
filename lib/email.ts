@@ -1,10 +1,8 @@
-import nodemailer from 'nodemailer';
-
-const SMTP_HOST = process.env.SMTP_HOST;
-const SMTP_PORT = Number(process.env.SMTP_PORT) || 587;
-const SMTP_USER = process.env.SMTP_USER;
-const SMTP_PASS = process.env.SMTP_PASS;
-const EMAIL_FROM = process.env.EMAIL_FROM || '"KP & Sons Wholesale" <info@kpsonswholesale.com>';
+// Transactional email via Resend (https://resend.com), using its HTTP API.
+// EMAIL_FROM must use a domain verified in Resend (Resend > Domains).
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const EMAIL_FROM = process.env.EMAIL_FROM || 'KP & Sons Wholesale <info@kpsonswholesale.com>';
+const EMAIL_REPLY_TO = process.env.EMAIL_REPLY_TO || '';
 const ADMIN_NOTIFICATION_EMAIL = process.env.ADMIN_NOTIFICATION_EMAIL || 'info@kpsonswholesale.com';
 
 /** Escape user-supplied text before putting it in email HTML. */
@@ -22,19 +20,36 @@ function oneLine(value: unknown): string {
   return String(value ?? '').replace(/[\r\n]+/g, ' ').slice(0, 150);
 }
 
-function getTransporter() {
-  if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) {
-    return null;
+/**
+ * Sends one email through Resend. Returns false (and logs) when RESEND_API_KEY
+ * isn't set, so the app keeps working without email. Throws if Resend rejects it.
+ */
+async function sendEmail(message: { to: string | string[]; subject: string; html: string }, label: string) {
+  if (!RESEND_API_KEY) {
+    console.log(`📧 (Email skipped - RESEND_API_KEY not configured) ${label}`);
+    return false;
   }
-  return nodemailer.createTransport({
-    host: SMTP_HOST,
-    port: SMTP_PORT,
-    secure: SMTP_PORT === 465,
-    auth: {
-      user: SMTP_USER,
-      pass: SMTP_PASS,
+
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${RESEND_API_KEY}`,
+      'Content-Type': 'application/json',
     },
+    body: JSON.stringify({
+      from: EMAIL_FROM,
+      to: Array.isArray(message.to) ? message.to : [message.to],
+      subject: message.subject,
+      html: message.html,
+      ...(EMAIL_REPLY_TO ? { reply_to: EMAIL_REPLY_TO } : {}),
+    }),
   });
+
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`Resend ${res.status}: ${detail.slice(0, 500)}`);
+  }
+  return true;
 }
 
 /**
@@ -46,12 +61,6 @@ export async function sendAdminNewApplicationNotification(application: {
   state: string;
   phone: string;
 }) {
-  const transporter = getTransporter();
-  if (!transporter) {
-    console.log('📧 (Email skipped - SMTP not configured) New application from:', application.businessName);
-    return;
-  }
-
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; line-height: 1.6; color: #16130f;">
       <h2 style="color: #123f28;">New Wholesale Application Received</h2>
@@ -71,24 +80,21 @@ export async function sendAdminNewApplicationNotification(application: {
     </div>
   `;
 
-  await transporter.sendMail({
-    from: EMAIL_FROM,
-    to: ADMIN_NOTIFICATION_EMAIL,
-    subject: `[New Wholesale Application] ${oneLine(application.businessName)} (${oneLine(application.state)})`,
-    html,
-  });
+  await sendEmail(
+    {
+      // Comma-separated list allowed, e.g. "info@...,sales@..."
+      to: ADMIN_NOTIFICATION_EMAIL.split(',').map((e) => e.trim()).filter(Boolean),
+      subject: `[New Wholesale Application] ${oneLine(application.businessName)} (${oneLine(application.state)})`,
+      html,
+    },
+    `New application from ${application.businessName}`
+  );
 }
 
 /**
  * Send approval email to customer with link to log in
  */
 export async function sendApplicationApprovedEmail(email: string, businessName: string) {
-  const transporter = getTransporter();
-  if (!transporter) {
-    console.log('📧 (Email skipped - SMTP not configured) Account approved for:', email);
-    return;
-  }
-
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; line-height: 1.6; color: #16130f;">
       <h2 style="color: #123f28;">Your KP & Sons Wholesale Account is Approved!</h2>
@@ -106,24 +112,20 @@ export async function sendApplicationApprovedEmail(email: string, businessName: 
     </div>
   `;
 
-  await transporter.sendMail({
-    from: EMAIL_FROM,
-    to: email,
-    subject: 'Your Wholesale Account is Approved — KP & Sons Wholesale',
-    html,
-  });
+  await sendEmail(
+    {
+      to: email,
+      subject: 'Your Wholesale Account is Approved — KP & Sons Wholesale',
+      html,
+    },
+    `Account approved for ${email}`
+  );
 }
 
 /**
  * Send rejection / clarification email
  */
 export async function sendApplicationRejectedEmail(email: string, businessName: string, reason: string) {
-  const transporter = getTransporter();
-  if (!transporter) {
-    console.log('📧 (Email skipped - SMTP not configured) Application rejected for:', email);
-    return;
-  }
-
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; line-height: 1.6; color: #16130f;">
       <h2 style="color: #123f28;">Update regarding your Wholesale Application</h2>
@@ -137,10 +139,12 @@ export async function sendApplicationRejectedEmail(email: string, businessName: 
     </div>
   `;
 
-  await transporter.sendMail({
-    from: EMAIL_FROM,
-    to: email,
-    subject: 'Update on your KP & Sons Wholesale Application',
-    html,
-  });
+  await sendEmail(
+    {
+      to: email,
+      subject: 'Update on your KP & Sons Wholesale Application',
+      html,
+    },
+    `Application rejected for ${email}`
+  );
 }

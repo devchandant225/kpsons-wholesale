@@ -6,17 +6,24 @@ export interface DocumentMeta {
   path: string;
   mimetype: string;
   size: number;
-  uploadedAt: Date;
+  uploadedAt: Date | string;
 }
 
+export interface ApplicationDocuments {
+  tobaccoLicense: DocumentMeta | null;
+  salesTaxLicense: DocumentMeta | null;
+  feinForm: DocumentMeta | null;
+  hempLicense: DocumentMeta | null;
+}
+
+/** An application as returned by the API (see serializeApplication in lib/db.ts). */
 export interface IWholesaleApplication {
-  _id?: string;
+  id: string;
   email: string;
-  passwordHash: string;
   businessName: string;
   dba?: string;
   businessPhone: string;
-  
+
   // Business Address
   address: {
     line1: string;
@@ -40,12 +47,7 @@ export interface IWholesaleApplication {
   };
 
   // Documents
-  documents: {
-    tobaccoLicense?: DocumentMeta;
-    salesTaxLicense?: DocumentMeta;
-    feinForm?: DocumentMeta;
-    hempLicense?: DocumentMeta;
-  };
+  documents: ApplicationDocuments;
 
   // Status & Review
   status: ApplicationStatus;
@@ -54,19 +56,10 @@ export interface IWholesaleApplication {
   adminNotes?: string;
   rejectionReason?: string;
   reviewedBy?: string;
-  reviewedAt?: Date;
+  reviewedAt?: Date | string;
 
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface IAdminUser {
-  _id?: string;
-  email: string;
-  passwordHash: string;
-  name: string;
-  role: 'ADMIN' | 'REP';
-  createdAt: Date;
+  createdAt: Date | string;
+  updatedAt: Date | string;
 }
 
 export interface ApiResponse<T = any> {

@@ -16,7 +16,9 @@ export function rateLimit(key: string, limit: number, windowMs: number): boolean
   if (!bucket || bucket.resetAt <= now) {
     buckets.set(key, { count: 1, resetAt: now + windowMs });
     if (buckets.size > 10000) {
-      for (const [k, b] of buckets) if (b.resetAt <= now) buckets.delete(k);
+      buckets.forEach((b, k) => {
+        if (b.resetAt <= now) buckets.delete(k);
+      });
     }
     return true;
   }

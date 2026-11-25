@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { connectToDatabase } from '@/lib/mongodb';
-import { AdminUser } from '@/models/AdminUser';
+import { prisma } from '@/lib/db';
 import { comparePassword, generateAdminToken } from '@/lib/auth';
 import { ADMIN_COOKIE } from '@/lib/admin-auth';
 import { clientIp, rateLimit } from '@/lib/rate-limit';
@@ -19,19 +18,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Email and password are required' }, { status: 400 });
     }
 
-    await connectToDatabase();
-    const admin = await AdminUser.findOne({ email });
+    const admin = await prisma.adminUser.findUnique({ where: { email } });
 
     if (!admin || !(await comparePassword(password, admin.passwordHash))) {
       return NextResponse.json({ ok: false, error: 'Invalid admin credentials' }, { status: 401 });
     }
 
-    const token = generateAdminToken({ id: String(admin._id), email: admin.email, role: admin.role });
+    const token = generateAdminToken({ id: admin.id, email: admin.email, role: admin.role });
 
     // The token lives only in the httpOnly cookie; it is not returned to page JS.
     const response = NextResponse.json({
       ok: true,
-      user: { id: admin._id, email: admin.email, name: admin.name, role: admin.role },
+      user: { id: admin.id, email: admin.email, name: admin.name, role: admin.role },
     });
 
     response.cookies.set({

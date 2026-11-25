@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { connectToDatabase } from '@/lib/mongodb';
-import { WholesaleApplication } from '@/models/WholesaleApplication';
+import { prisma, serializeApplication } from '@/lib/db';
 import { checkAdminAuth, isValidId } from '@/lib/admin-auth';
 import { createApprovedShopifyCustomer } from '@/lib/shopify';
 import { sendApplicationApprovedEmail } from '@/lib/email';
@@ -15,18 +14,17 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   }
 
   try {
-    await connectToDatabase();
-    const application = await WholesaleApplication.findById(params.id);
+    const row = await prisma.wholesaleApplication.findUnique({ where: { id: params.id } });
 
-    if (!application) {
+    if (!row) {
       return NextResponse.json({ ok: false, error: 'Application not found' }, { status: 404 });
     }
-    if (application.status === 'APPROVED') {
+    if (row.status === 'APPROVED') {
       return NextResponse.json({ ok: false, error: 'This application is already approved.' }, { status: 409 });
     }
 
     // 1. Sync to Shopify Admin (create customer with wholesale tags)
-    const shopifyResult = await createApprovedShopifyCustomer(application);
+    const shopifyResult = await createApprovedShopifyCustomer(serializeApplication(row));
     if (!shopifyResult.success) {
       return NextResponse.json(
         { ok: false, error: `Shopify sync failed: ${shopifyResult.error}. Account was not approved.` },
@@ -34,27 +32,30 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       );
     }
 
-    // 2. Update status in MongoDB
-    application.status = 'APPROVED';
-    application.shopifyCustomerId = shopifyResult.customerId || '';
-    application.rejectionReason = '';
-    application.reviewedBy = admin.email;
-    application.reviewedAt = new Date();
-    await application.save();
+    // 2. Update status in Postgres
+    const updated = await prisma.wholesaleApplication.update({
+      where: { id: row.id },
+      data: {
+        status: 'APPROVED',
+        shopifyCustomerId: shopifyResult.customerId || '',
+        rejectionReason: '',
+        reviewedBy: admin.email,
+        reviewedAt: new Date(),
+      },
+    });
 
     // 3. Send approval email to customer
-    sendApplicationApprovedEmail(application.email, application.businessName).catch((err) =>
+    sendApplicationApprovedEmail(updated.email, updated.businessName).catch((err) =>
       console.error('Failed to send approval email:', err)
     );
 
-    const { passwordHash, ...safe } = application.toObject();
     return NextResponse.json({
       ok: true,
       message: `Account approved and synced to Shopify (Customer ID: ${shopifyResult.customerId})`,
-      application: safe,
+      application: serializeApplication(updated),
     });
   } catch (error: any) {
     console.error('Approval error:', error);
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: false, error: 'Approval failed' }, { status: 500 });
   }
 }

@@ -1,9 +1,15 @@
 import { IWholesaleApplication } from '@/types';
 
 const SHOPIFY_STORE_DOMAIN = process.env.SHOPIFY_STORE_DOMAIN || 'ujwt36-mq.myshopify.com';
+// Auth, either:
+//  - SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET (Dev Dashboard app): the app fetches a
+//    short-lived token with the client credentials grant and renews it automatically, or
+//  - SHOPIFY_ADMIN_ACCESS_TOKEN (shpat_..., legacy custom app made in the store admin).
+const SHOPIFY_CLIENT_ID = process.env.SHOPIFY_CLIENT_ID;
+const SHOPIFY_CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET;
 const SHOPIFY_ADMIN_ACCESS_TOKEN = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN;
 // Shopify only supports each API version for ~12 months. Keep this current.
-const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || '2025-10';
+const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || '2026-10';
 
 const WHOLESALE_TAGS = ['wholesale', 'b2b-approved', 'tax-exempt'];
 
@@ -15,15 +21,64 @@ export interface CreateShopifyCustomerResult {
 
 const apiUrl = (p: string) => `https://${SHOPIFY_STORE_DOMAIN}/admin/api/${SHOPIFY_API_VERSION}/${p}`;
 
-async function shopifyFetch(p: string, init: RequestInit = {}) {
-  const res = await fetch(apiUrl(p), {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Shopify-Access-Token': SHOPIFY_ADMIN_ACCESS_TOKEN!,
-      ...(init.headers || {}),
-    },
+const hasClientCredentials = () => !!(SHOPIFY_CLIENT_ID && SHOPIFY_CLIENT_SECRET);
+const isShopifyConfigured = () => hasClientCredentials() || !!SHOPIFY_ADMIN_ACCESS_TOKEN;
+
+// Cached client-credentials token (one per process).
+let cachedToken: { value: string; expiresAt: number } | null = null;
+let pendingToken: Promise<string> | null = null;
+
+async function requestClientCredentialsToken(): Promise<string> {
+  const res = await fetch(`https://${SHOPIFY_STORE_DOMAIN}/admin/oauth/access_token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+    body: new URLSearchParams({
+      grant_type: 'client_credentials',
+      client_id: SHOPIFY_CLIENT_ID!,
+      client_secret: SHOPIFY_CLIENT_SECRET!,
+    }),
   });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.access_token) {
+    throw new Error(
+      `Could not get a Shopify access token (${res.status}): ${JSON.stringify(data.error_description || data.error || data.errors || data)}`
+    );
+  }
+  // Renew 5 minutes early. Shopify sends expires_in in seconds (about 24 hours).
+  const lifetimeMs = (Number(data.expires_in) || 3600) * 1000;
+  cachedToken = { value: data.access_token, expiresAt: Date.now() + lifetimeMs - 5 * 60 * 1000 };
+  return data.access_token;
+}
+
+async function getAccessToken(forceRefresh = false): Promise<string> {
+  if (!hasClientCredentials()) return SHOPIFY_ADMIN_ACCESS_TOKEN!;
+  if (!forceRefresh && cachedToken && cachedToken.expiresAt > Date.now()) return cachedToken.value;
+  // Share one in-flight request between concurrent callers.
+  if (!pendingToken) {
+    pendingToken = requestClientCredentialsToken().finally(() => {
+      pendingToken = null;
+    });
+  }
+  return pendingToken;
+}
+
+async function shopifyFetch(p: string, init: RequestInit = {}) {
+  const send = async (token: string) =>
+    fetch(apiUrl(p), {
+      ...init,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Shopify-Access-Token': token,
+        ...(init.headers || {}),
+      },
+    });
+
+  let res = await send(await getAccessToken());
+  // Token revoked or expired early: get a fresh one and retry once.
+  if (res.status === 401 && hasClientCredentials()) {
+    cachedToken = null;
+    res = await send(await getAccessToken(true));
+  }
   const data = await res.json().catch(() => ({}));
   return { res, data };
 }
@@ -44,11 +99,14 @@ function toE164(phone?: string): string | undefined {
 export async function createApprovedShopifyCustomer(
   application: IWholesaleApplication
 ): Promise<CreateShopifyCustomerResult> {
-  if (!SHOPIFY_ADMIN_ACCESS_TOKEN) {
+  if (!isShopifyConfigured()) {
     if (process.env.NODE_ENV === 'production') {
-      return { success: false, error: 'SHOPIFY_ADMIN_ACCESS_TOKEN is not configured on the server.' };
+      return {
+        success: false,
+        error: 'Shopify is not configured on the server (set SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET).',
+      };
     }
-    console.warn('⚠️ SHOPIFY_ADMIN_ACCESS_TOKEN missing. Simulating approval (development only).');
+    console.warn('⚠️ Shopify credentials missing. Simulating approval (development only).');
     return { success: true, customerId: `mock_shopify_${Date.now()}` };
   }
 

@@ -72,7 +72,7 @@ export function getAbsoluteFilePath(filename: string): string {
 }
 
 /** Best-effort removal of files saved for a request that then failed. */
-export async function deleteStoredFiles(docs: (DocumentMeta | undefined)[]) {
+export async function deleteStoredFiles(docs: (DocumentMeta | null | undefined)[]) {
   await Promise.all(
     docs
       .filter((d): d is DocumentMeta => !!d)

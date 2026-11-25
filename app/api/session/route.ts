@@ -1,8 +1,8 @@
 import { NextRequest } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { handleOptions, jsonResponse } from '@/lib/cors';
-import { connectToDatabase } from '@/lib/mongodb';
-import { WholesaleApplication } from '@/models/WholesaleApplication';
+import { prisma } from '@/lib/db';
+import { isValidId } from '@/lib/admin-auth';
 
 export async function OPTIONS(request: NextRequest) {
   return handleOptions(request);
@@ -25,13 +25,15 @@ export async function GET(request: NextRequest) {
   }
 
   const payload = verifyToken(token);
-  if (!payload || !payload.id) {
+  if (!payload || !payload.id || !isValidId(payload.id)) {
     return jsonResponse({ loggedIn: false }, 200, origin);
   }
 
   try {
-    await connectToDatabase();
-    const app = await WholesaleApplication.findById(payload.id).select('email businessName status assignedSalesRep');
+    const app = await prisma.wholesaleApplication.findUnique({
+      where: { id: payload.id },
+      select: { email: true, businessName: true, status: true, assignedSalesRep: true },
+    });
 
     if (!app || app.status !== 'APPROVED') {
       return jsonResponse({ loggedIn: false, status: app?.status || 'UNKNOWN' }, 200, origin);

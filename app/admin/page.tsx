@@ -204,7 +204,7 @@ export default function AdminDashboardPage() {
                 </tr>
               ) : (
                 applications.map((app) => (
-                  <tr key={String(app._id)} className="hover:bg-slate-50/80 transition">
+                  <tr key={app.id} className="hover:bg-slate-50/80 transition">
                     <td className="py-3.5 px-4">
                       <div className="font-bold text-slate-900 flex items-center gap-1.5">
                         <Building2 className="w-4 h-4 text-slate-400 flex-shrink-0" />
@@ -284,7 +284,7 @@ export default function AdminDashboardPage() {
 
                     <td className="py-3.5 px-4 text-right">
                       <Link
-                        href={`/admin/applications/${String(app._id)}`}
+                        href={`/admin/applications/${app.id}`}
                         className="inline-flex items-center gap-1 text-xs font-bold text-[#123f28] hover:text-[#0b2a1a] bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg transition"
                       >
                         <span>Review</span>

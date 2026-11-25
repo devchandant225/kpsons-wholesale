@@ -1,12 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { connectToDatabase } from '@/lib/mongodb';
-import { WholesaleApplication } from '@/models/WholesaleApplication';
+import { Prisma, ApplicationStatus } from '@prisma/client';
+import { prisma, serializeApplication } from '@/lib/db';
 import { checkAdminAuth } from '@/lib/admin-auth';
 
-const STATUSES = ['PENDING', 'APPROVED', 'REJECTED', 'NEEDS_INFO'];
-
-/** Escape regex metacharacters so search text is matched literally. */
-const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const STATUSES: ApplicationStatus[] = ['PENDING', 'APPROVED', 'REJECTED', 'NEEDS_INFO'];
 
 export async function GET(request: NextRequest) {
   if (!checkAdminAuth(request)) {
@@ -14,37 +11,38 @@ export async function GET(request: NextRequest) {
   }
 
   const { searchParams } = new URL(request.url);
-  const status = searchParams.get('status');
+  const status = searchParams.get('status') as ApplicationStatus | null;
   const search = (searchParams.get('search') || '').trim().slice(0, 100);
   const page = Math.max(1, Number(searchParams.get('page')) || 1);
   const limit = Math.min(50, Math.max(1, Number(searchParams.get('limit')) || 20));
 
   try {
-    await connectToDatabase();
-
-    const query: Record<string, any> = {};
+    const where: Prisma.WholesaleApplicationWhereInput = {};
     if (status && STATUSES.includes(status)) {
-      query.status = status;
+      where.status = status;
     }
     if (search) {
-      const rx = { $regex: escapeRegex(search), $options: 'i' };
-      query.$or = [{ businessName: rx }, { email: rx }, { dba: rx }, { 'address.state': rx }];
+      // Prisma escapes the text, so it is matched literally (case-insensitive).
+      const contains = { contains: search, mode: 'insensitive' as const };
+      where.OR = [{ businessName: contains }, { email: contains }, { dba: contains }, { state: contains }];
     }
 
-    const [total, applications, grouped] = await Promise.all([
-      WholesaleApplication.countDocuments(query),
-      WholesaleApplication.find(query)
-        .select('-passwordHash')
-        .sort({ createdAt: -1 })
-        .skip((page - 1) * limit)
-        .limit(limit)
-        .lean(),
-      WholesaleApplication.aggregate([{ $group: { _id: '$status', n: { $sum: 1 } } }]),
+    const [total, rows, grouped] = await Promise.all([
+      prisma.wholesaleApplication.count({ where }),
+      prisma.wholesaleApplication.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      prisma.wholesaleApplication.groupBy({ by: ['status'], _count: { _all: true } }),
     ]);
 
-    const byStatus = Object.fromEntries(grouped.map((g: { _id: string; n: number }) => [g._id, g.n]));
+    const byStatus = Object.fromEntries(grouped.map((g) => [g.status, g._count._all])) as Partial<
+      Record<ApplicationStatus, number>
+    >;
     const counts = {
-      all: grouped.reduce((sum: number, g: { n: number }) => sum + g.n, 0),
+      all: grouped.reduce((sum, g) => sum + g._count._all, 0),
       pending: byStatus.PENDING || 0,
       approved: byStatus.APPROVED || 0,
       rejected: byStatus.REJECTED || 0,
@@ -53,12 +51,12 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      applications,
+      applications: rows.map(serializeApplication),
       counts,
       pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
     });
   } catch (error: any) {
     console.error('Failed to list applications:', error);
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: false, error: 'Failed to load applications' }, { status: 500 });
   }
 }

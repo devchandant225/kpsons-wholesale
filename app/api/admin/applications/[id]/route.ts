@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { connectToDatabase } from '@/lib/mongodb';
-import { WholesaleApplication } from '@/models/WholesaleApplication';
+import { prisma, serializeApplication, isNotFound } from '@/lib/db';
 import { checkAdminAuth, isValidId } from '@/lib/admin-auth';
 
 const notFound = () => NextResponse.json({ ok: false, error: 'Application not found' }, { status: 404 });
@@ -12,12 +11,12 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   if (!isValidId(params.id)) return notFound();
 
   try {
-    await connectToDatabase();
-    const application = await WholesaleApplication.findById(params.id).select('-passwordHash');
-    if (!application) return notFound();
-    return NextResponse.json({ ok: true, application });
+    const row = await prisma.wholesaleApplication.findUnique({ where: { id: params.id } });
+    if (!row) return notFound();
+    return NextResponse.json({ ok: true, application: serializeApplication(row) });
   } catch (error: any) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    console.error('Failed to load application:', error);
+    return NextResponse.json({ ok: false, error: 'Failed to load application' }, { status: 500 });
   }
 }
 
@@ -29,20 +28,15 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
 
   try {
     const body = await request.json().catch(() => ({}));
-    const allowedUpdates: Record<string, string> = {};
-    if (typeof body.assignedSalesRep === 'string') allowedUpdates.assignedSalesRep = body.assignedSalesRep.slice(0, 200);
-    if (typeof body.adminNotes === 'string') allowedUpdates.adminNotes = body.adminNotes.slice(0, 10000);
+    const data: { assignedSalesRep?: string; adminNotes?: string } = {};
+    if (typeof body.assignedSalesRep === 'string') data.assignedSalesRep = body.assignedSalesRep.slice(0, 200);
+    if (typeof body.adminNotes === 'string') data.adminNotes = body.adminNotes.slice(0, 10000);
 
-    await connectToDatabase();
-    const application = await WholesaleApplication.findByIdAndUpdate(
-      params.id,
-      { $set: allowedUpdates },
-      { new: true }
-    ).select('-passwordHash');
-    if (!application) return notFound();
-
-    return NextResponse.json({ ok: true, application });
+    const row = await prisma.wholesaleApplication.update({ where: { id: params.id }, data });
+    return NextResponse.json({ ok: true, application: serializeApplication(row) });
   } catch (error: any) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    if (isNotFound(error)) return notFound();
+    console.error('Failed to update application:', error);
+    return NextResponse.json({ ok: false, error: 'Failed to update application' }, { status: 500 });
   }
 }

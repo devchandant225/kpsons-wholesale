@@ -1,6 +1,5 @@
 import { NextRequest } from 'next/server';
-import { connectToDatabase } from '@/lib/mongodb';
-import { WholesaleApplication } from '@/models/WholesaleApplication';
+import { prisma } from '@/lib/db';
 import { comparePassword, generateToken } from '@/lib/auth';
 import { handleOptions, jsonResponse } from '@/lib/cors';
 import { clientIp, rateLimit } from '@/lib/rate-limit';
@@ -37,8 +36,7 @@ export async function POST(request: NextRequest) {
       return jsonResponse({ ok: false, error: 'Email and password are required.' }, 400, origin);
     }
 
-    await connectToDatabase();
-    const application = await WholesaleApplication.findOne({ email });
+    const application = await prisma.wholesaleApplication.findUnique({ where: { email } });
 
     if (!application) {
       return jsonResponse({ ok: false, error: 'Invalid email or password.' }, 401, origin);
@@ -89,7 +87,7 @@ export async function POST(request: NextRequest) {
 
     // Generate JWT token
     const token = generateToken({
-      id: String(application._id),
+      id: application.id,
       email: application.email,
       businessName: application.businessName,
       status: application.status,
@@ -100,7 +98,7 @@ export async function POST(request: NextRequest) {
         ok: true,
         token,
         customer: {
-          id: application._id,
+          id: application.id,
           email: application.email,
           businessName: application.businessName,
           status: application.status,

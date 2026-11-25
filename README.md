@@ -2,7 +2,7 @@
 
 A full-stack Next.js application that provides wholesale retailer registration, license/tax document verification, staff review dashboard, session authentication, and automated customer synchronization with **Shopify Admin** (`ujwt36-mq.myshopify.com`).
 
-Designed to run on your **VPS** with **MongoDB Atlas** for database storage and the local VPS filesystem for document uploads.
+Designed to run on your **VPS** with **PostgreSQL** (via Prisma) for database storage and the local VPS filesystem for document uploads.
 
 ---
 
@@ -20,13 +20,13 @@ Designed to run on your **VPS** with **MongoDB Atlas** for database storage and 
                                            │  - /admin (Staff Dashboard)    │
                                            └──────┬──────────────────┬──────┘
                                                   │                  │
-                                           MongoDB Atlas      VPS Disk (/uploads)
+                                             PostgreSQL       VPS Disk (/uploads)
                                            (Applications)    (PDFs & Licenses)
 ```
 
 1. **Storefront Compatibility**:
    - `GET /api/csrf`: Generates token before form submission.
-   - `POST /api/register`: Receives multi-part form data with business info and license files (Tobacco License, Sales Tax, FEIN Form). Saves files to VPS storage and metadata to MongoDB Atlas.
+   - `POST /api/register`: Receives multi-part form data with business info and license files (Tobacco License, Sales Tax, FEIN Form). Saves files to VPS storage and metadata to PostgreSQL.
    - `POST /api/login`: Authenticates approved wholesale buyers and issues JWT session tokens.
    - `GET /api/session`: Used by `snippets/wholesale-site-gate.liquid` to unlock dealer pricing and wholesale pages.
    - `GET /api/account` & `POST /api/logout`: Profile management and session termination.
@@ -70,13 +70,13 @@ kp-app/
 ├── lib/
 │   ├── auth.ts                         # Password hashing, JWT token handling
 │   ├── cors.ts                         # Cross-Origin headers for storefront
-│   ├── email.ts                        # Nodemailer transactional email delivery
+│   ├── email.ts                        # Transactional email via Resend
 │   ├── file-storage.ts                 # Disk upload storage helper
-│   ├── mongodb.ts                      # MongoDB Atlas Mongoose connection cache
+│   ├── db.ts                           # Prisma client + row → API serializer
 │   └── shopify.ts                      # Shopify Admin API client
-├── models/
-│   ├── AdminUser.ts                    # Staff user schema
-│   └── WholesaleApplication.ts         # Wholesale applicant schema
+├── prisma/
+│   ├── schema.prisma                   # Postgres tables (admin_users, wholesale_applications)
+│   └── migrations/                     # SQL migrations (npx prisma migrate deploy)
 ├── public/
 │   └── uploads/                        # Uploaded license files on VPS
 ├── scripts/
@@ -94,14 +94,17 @@ kp-app/
 
 ## Step-by-Step Setup Guide
 
-### 1. MongoDB Atlas Setup
-1. Create a free cluster on [MongoDB Atlas](https://www.mongodb.com/cloud/atlas).
-2. Under **Database Access**, create a database user (e.g., `kp_admin`) with Read/Write privileges.
-3. Under **Network Access**, whitelist your VPS IP (or `0.0.0.0/0` with strong password).
-4. Click **Connect > Drivers > Node.js** to copy your connection string:
-   ```
-   mongodb+srv://<username>:<password>@cluster0.mongodb.net/kp_wholesale?retryWrites=true&w=majority
-   ```
+### 1. PostgreSQL Setup
+Use any Postgres 13+ server (on the VPS, or managed: Supabase, Neon, RDS, etc.). On the VPS:
+```bash
+sudo apt install -y postgresql
+sudo -u postgres psql -c "CREATE USER kp_app WITH PASSWORD 'choose-a-strong-password';"
+sudo -u postgres psql -c "CREATE DATABASE kp_wholesale OWNER kp_app;"
+```
+Connection string:
+```
+postgresql://kp_app:choose-a-strong-password@localhost:5432/kp_wholesale?schema=public
+```
 
 ### 2. Environment Configuration
 Copy `.env.example` to `.env.local`:
@@ -109,16 +112,17 @@ Copy `.env.example` to `.env.local`:
 cp .env.example .env.local
 ```
 Fill in:
-- `MONGODB_URI`: Your MongoDB Atlas connection string.
+- `DATABASE_URL`: Your Postgres connection string.
 - `JWT_SECRET`: Random 32+ character string.
 - `SHOPIFY_STORE_DOMAIN`: `ujwt36-mq.myshopify.com`
-- `SHOPIFY_ADMIN_ACCESS_TOKEN`: Private App Admin Access Token (created in Shopify Admin > Settings > Apps > Develop Apps).
-- `SMTP_*`: Your email credentials for notifications.
+- `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET`: from a Dev Dashboard app (dev.shopify.com) installed on the store with `read_customers` and `write_customers` scopes. The app gets and renews its access token itself. (A legacy `SHOPIFY_ADMIN_ACCESS_TOKEN` also still works.)
+- `RESEND_API_KEY`, `EMAIL_FROM`: Resend API key and a From address on a domain verified in Resend (emails are skipped if the key is blank).
 
 ### 3. Install & Seed Initial Staff User
 When you are ready to install dependencies:
 ```bash
-npm install
+npm install            # also runs `prisma generate`
+npx prisma migrate deploy   # creates the tables
 ```
 Seed the first staff admin user:
 ```bash
@@ -153,6 +157,7 @@ sudo npm install -g pm2
 ```bash
 cd /var/www/kp-app
 npm install
+npx prisma migrate deploy
 npm run build
 pm2 start ecosystem.config.js
 pm2 save
@@ -187,4 +192,4 @@ Once deployed to your domain (e.g., `https://auth.kpsonswholesale.com`), update 
 3. **Wholesale Site Gate** (`snippets/wholesale-site-gate.liquid`):
    Set `WORKER_BASE` to `"https://auth.kpsonswholesale.com"`.
 
-That's it! All retailer applications, document uploads, and session gates will now run entirely through your own private backend and MongoDB Atlas cluster.
+That's it! All retailer applications, document uploads, and session gates will now run entirely through your own private backend and PostgreSQL database.

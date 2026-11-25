@@ -1,8 +1,8 @@
 import { NextRequest } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { handleOptions, jsonResponse } from '@/lib/cors';
-import { connectToDatabase } from '@/lib/mongodb';
-import { WholesaleApplication } from '@/models/WholesaleApplication';
+import { prisma } from '@/lib/db';
+import { isValidId } from '@/lib/admin-auth';
 
 export async function OPTIONS(request: NextRequest) {
   return handleOptions(request);
@@ -24,13 +24,12 @@ export async function GET(request: NextRequest) {
   }
 
   const payload = verifyToken(token);
-  if (!payload || !payload.id) {
+  if (!payload || !payload.id || !isValidId(payload.id)) {
     return jsonResponse({ loggedIn: false }, 401, origin);
   }
 
   try {
-    await connectToDatabase();
-    const app = await WholesaleApplication.findById(payload.id).select('-passwordHash');
+    const app = await prisma.wholesaleApplication.findUnique({ where: { id: payload.id } });
 
     if (!app) {
       return jsonResponse({ loggedIn: false }, 404, origin);
@@ -40,13 +39,29 @@ export async function GET(request: NextRequest) {
       {
         loggedIn: true,
         account: {
-          id: app._id,
+          id: app.id,
           email: app.email,
           businessName: app.businessName,
           dba: app.dba,
           phone: app.businessPhone,
-          address: app.address,
-          billing: app.billing,
+          address: {
+            line1: app.addressLine1,
+            line2: app.addressLine2,
+            city: app.city,
+            state: app.state,
+            postalCode: app.postalCode,
+            country: app.country,
+          },
+          billing: {
+            sameAsBusiness: app.billingSameAsBusiness,
+            name: app.billingName,
+            line1: app.billingLine1,
+            line2: app.billingLine2,
+            city: app.billingCity,
+            state: app.billingState,
+            postalCode: app.billingPostalCode,
+            country: app.billingCountry,
+          },
           status: app.status,
           salesRep: app.assignedSalesRep || 'Lansdale Sales Desk (+1 267 902-1290)',
           createdAt: app.createdAt,
@@ -56,6 +71,7 @@ export async function GET(request: NextRequest) {
       origin
     );
   } catch (error) {
+    console.error('Account lookup error:', error);
     return jsonResponse({ loggedIn: false, error: 'Failed to load account' }, 500, origin);
   }
 }
