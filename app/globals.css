@@ -1,0 +1,19 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --kp-brand: #123f28;
+  --kp-brand-hover: #0b2a1a;
+  --kp-accent: #3fcf63;
+  --kp-surface: #f2f2ed;
+  --kp-text: #16130f;
+  --kp-radius: 10px;
+}
+
+body {
+  color: var(--kp-text);
+  background-color: #f8fafc;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
