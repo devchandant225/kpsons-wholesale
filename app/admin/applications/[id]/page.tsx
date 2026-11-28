@@ -5,22 +5,65 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   ArrowLeft,
-  Building2,
   Mail,
   Phone,
   MapPin,
   FileText,
   CheckCircle2,
   XCircle,
-  Clock,
   Eye,
   AlertTriangle,
   Loader2,
   Save,
-  Trash2
+  Trash2,
+  Calendar,
+  ShieldCheck,
+  History,
 } from 'lucide-react';
-import { IWholesaleApplication } from '@/types';
+import { DocumentMeta, IWholesaleApplication } from '@/types';
 import { readJson } from '@/lib/read-json';
+import { Avatar, Button, Card, Field, StatusBadge, buttonClass, cx, formatDate, timeAgo } from '@/components/admin/ui';
+
+function DocumentRow({ label, doc, optional }: { label: string; doc: DocumentMeta | null | undefined; optional?: boolean }) {
+  return (
+    <li className="flex items-center gap-3 px-5 py-3.5">
+      <span
+        className={cx(
+          'flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md',
+          doc ? 'bg-emerald-50 text-emerald-700' : optional ? 'bg-slate-100 text-slate-400' : 'bg-red-50 text-red-600'
+        )}
+      >
+        <FileText className="h-4 w-4" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-x-2 text-sm font-medium text-slate-900">
+          {label}
+          {optional && <span className="text-xs font-normal text-slate-400">Optional</span>}
+        </div>
+        {doc ? (
+          <div className="truncate text-xs text-slate-500" title={doc.originalName}>
+            {doc.originalName} · {(doc.size / 1024).toFixed(1)} KB
+          </div>
+        ) : (
+          <div className={cx('text-xs', optional ? 'text-slate-400' : 'font-medium text-red-600')}>
+            {optional ? 'Not provided' : 'Missing'}
+          </div>
+        )}
+      </div>
+      {doc && (
+        <a
+          href={`/api/admin/applications/documents/${doc.filename}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={buttonClass('secondary', 'sm')}
+        >
+          <Eye className="h-3.5 w-3.5" />
+          <span>View</span>
+        </a>
+      )}
+    </li>
+  );
+}
 
 export default function ApplicationDetailPage({ params }: { params: { id: string } }) {
   const router = useRouter();
@@ -165,431 +208,314 @@ export default function ApplicationDetailPage({ params }: { params: { id: string
     }
   };
 
+
   if (loading) {
     return (
-      <div className="py-20 text-center text-slate-500">
-        <Loader2 className="w-8 h-8 animate-spin mx-auto text-[#123f28] mb-2" />
-        <span>Loading application details…</span>
+      <div className="space-y-6 animate-pulse">
+        <div className="h-4 w-40 rounded bg-slate-200" />
+        <div className="h-24 rounded-lg bg-white border border-slate-200" />
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          <div className="h-80 rounded-lg bg-white border border-slate-200 lg:col-span-2" />
+          <div className="h-80 rounded-lg bg-white border border-slate-200" />
+        </div>
       </div>
     );
   }
 
   if (!app) {
     return (
-      <div className="bg-white p-8 rounded-xl border border-slate-200 text-center">
-        <AlertTriangle className="w-10 h-10 text-amber-500 mx-auto mb-2" />
-        <h2 className="text-lg font-bold text-slate-800">Application Not Found</h2>
-        <Link href="/admin" className="text-[#123f28] font-semibold text-sm mt-4 inline-block hover:underline">
-          &larr; Back to Dashboard
+      <div className="rounded-lg border border-slate-200 bg-white p-10 text-center">
+        <AlertTriangle className="mx-auto mb-3 h-10 w-10 text-amber-500" />
+        <h2 className="text-lg font-semibold text-slate-900">Application not found</h2>
+        {error && <p className="mt-1 text-sm text-slate-500">{error}</p>}
+        <Link href="/admin" className={buttonClass('secondary', 'md', 'mt-5')}>
+          <ArrowLeft className="h-4 w-4" />
+          Back to applications
         </Link>
       </div>
     );
   }
 
+  const canDecide = app.status === 'PENDING' || app.status === 'NEEDS_INFO';
+  const requiredDocs = [app.documents?.tobaccoLicense, app.documents?.salesTaxLicense, app.documents?.feinForm];
+  const docsHave = requiredDocs.filter(Boolean).length;
+
   return (
     <div className="space-y-6">
-      {/* Top Breadcrumb & Status Actions */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <Link
-          href="/admin"
-          className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-slate-900 transition"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          <span>Back to All Applications</span>
-        </Link>
+      <Link
+        href="/admin"
+        className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 transition hover:text-slate-900"
+      >
+        <ArrowLeft className="h-4 w-4" />
+        Back to applications
+      </Link>
 
-        {/* Approval / Rejection Action Buttons */}
-        <div className="flex items-center gap-3">
-          {app.status === 'PENDING' && (
-            <>
-              <button
-                onClick={() => setShowRejectModal(true)}
-                disabled={actionLoading}
-                className="bg-white border border-red-300 text-red-700 hover:bg-red-50 px-4 py-2 rounded-lg text-sm font-bold transition shadow-sm disabled:opacity-60 flex items-center gap-1.5"
-              >
-                <XCircle className="w-4 h-4" />
-                <span>Reject / Request Info</span>
-              </button>
+      {/* Record header */}
+      <section className="rounded-lg border border-slate-200 bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+        <div className="flex flex-col gap-5 p-5 sm:p-6 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex min-w-0 items-start gap-4">
+            <Avatar name={app.businessName} size="lg" />
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="truncate text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">{app.businessName}</h1>
+                <StatusBadge status={app.status} size="md" />
+              </div>
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500">
+                {app.dba && <span>DBA {app.dba}</span>}
+                <span className="inline-flex items-center gap-1.5">
+                  <MapPin className="h-4 w-4 text-slate-400" />
+                  {app.address.city}, {app.address.state}
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <Calendar className="h-4 w-4 text-slate-400" />
+                  Submitted {formatDate(app.createdAt)} ({timeAgo(app.createdAt)})
+                </span>
+              </div>
+            </div>
+          </div>
 
-              <button
-                onClick={handleApprove}
-                disabled={actionLoading}
-                className="bg-[#123f28] hover:bg-[#0b2a1a] text-white px-5 py-2 rounded-lg text-sm font-bold transition shadow-md disabled:opacity-60 flex items-center gap-1.5"
-              >
-                {actionLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                <span>Approve Wholesale Account</span>
-              </button>
-            </>
-          )}
-
-          {app.status === 'APPROVED' && (
-            <span className="inline-flex items-center gap-1.5 bg-emerald-100 text-emerald-800 px-3.5 py-1.5 rounded-lg text-sm font-bold">
-              <CheckCircle2 className="w-4 h-4" />
-              <span>Approved &amp; Active</span>
-            </span>
-          )}
-
-          {app.status === 'REJECTED' && (
-            <span className="inline-flex items-center gap-1.5 bg-red-100 text-red-800 px-3.5 py-1.5 rounded-lg text-sm font-bold">
-              <XCircle className="w-4 h-4" />
-              <span>Rejected</span>
-            </span>
+          {canDecide && (
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Button variant="danger" onClick={() => setShowRejectModal(true)} disabled={actionLoading}>
+                <XCircle className="h-4 w-4" />
+                <span>Reject / request info</span>
+              </Button>
+              <Button variant="primary" onClick={handleApprove} disabled={actionLoading}>
+                {actionLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                <span>Approve account</span>
+              </Button>
+            </div>
           )}
         </div>
-      </div>
+
+        {/* Summary strip */}
+        <dl className="grid grid-cols-2 divide-slate-100 border-t border-slate-100 sm:grid-cols-4 sm:divide-x">
+          <div className="px-5 py-3 sm:px-6">
+            <dt className="text-xs font-medium text-slate-500">Documents</dt>
+            <dd className={cx('mt-0.5 text-sm font-semibold', docsHave === 3 ? 'text-emerald-700' : 'text-amber-700')}>
+              {docsHave} of 3 required
+            </dd>
+          </div>
+          <div className="px-5 py-3 sm:px-6">
+            <dt className="text-xs font-medium text-slate-500">Sales rep</dt>
+            <dd className="mt-0.5 truncate text-sm font-semibold text-slate-900">{app.assignedSalesRep || 'Unassigned'}</dd>
+          </div>
+          <div className="px-5 py-3 sm:px-6">
+            <dt className="text-xs font-medium text-slate-500">Shopify customer</dt>
+            <dd className="mt-0.5 truncate font-mono text-sm font-semibold text-slate-900">{app.shopifyCustomerId || '—'}</dd>
+          </div>
+          <div className="px-5 py-3 sm:px-6">
+            <dt className="text-xs font-medium text-slate-500">Last reviewed</dt>
+            <dd className="mt-0.5 truncate text-sm font-semibold text-slate-900">
+              {app.reviewedAt ? formatDate(app.reviewedAt) : 'Not yet'}
+            </dd>
+          </div>
+        </dl>
+      </section>
 
       {/* Notifications */}
       {error && (
-        <div className="p-4 bg-red-50 border border-red-200 text-red-800 rounded-xl text-sm flex items-start gap-2">
-          <AlertTriangle className="w-5 h-5 flex-shrink-0 text-red-500" />
+        <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800" role="alert">
+          <AlertTriangle className="h-5 w-5 flex-shrink-0 text-red-500" />
           <span>{error}</span>
         </div>
       )}
       {success && (
-        <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-sm flex items-start gap-2">
-          <CheckCircle2 className="w-5 h-5 flex-shrink-0 text-emerald-500" />
+        <div className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800" role="status">
+          <CheckCircle2 className="h-5 w-5 flex-shrink-0 text-emerald-500" />
           <span>{success}</span>
         </div>
       )}
+      {app.status === 'REJECTED' && app.rejectionReason && (
+        <div className="rounded-lg border border-red-200 bg-white p-4 text-sm">
+          <div className="font-semibold text-red-800">Rejection reason sent to applicant</div>
+          <p className="mt-1 whitespace-pre-line text-slate-700">{app.rejectionReason}</p>
+        </div>
+      )}
 
-      {/* Main Grid: Details (Left) + Documents & Notes (Right) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column: Business & Contact Info */}
-        <div className="lg:col-span-2 space-y-6">
-          <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
-              <div>
-                <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-                  <Building2 className="w-5 h-5 text-slate-400" />
-                  <span>{app.businessName}</span>
-                </h2>
-                {app.dba && <p className="text-xs text-slate-400 mt-0.5">DBA: {app.dba}</p>}
-              </div>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        {/* Main column */}
+        <div className="space-y-6 lg:col-span-2">
+          <Card title="Business information" description="As submitted on the wholesale application">
+            <dl className="grid grid-cols-1 gap-x-6 gap-y-5 sm:grid-cols-2">
+              <Field label="Contact email">
+                <a href={`mailto:${app.email}`} className="inline-flex items-center gap-1.5 font-medium text-[#123f28] hover:underline">
+                  <Mail className="h-4 w-4 text-slate-400" />
+                  {app.email}
+                </a>
+              </Field>
+              <Field label="Business phone">
+                {app.businessPhone ? (
+                  <a href={`tel:${app.businessPhone}`} className="inline-flex items-center gap-1.5 hover:underline">
+                    <Phone className="h-4 w-4 text-slate-400" />
+                    {app.businessPhone}
+                  </a>
+                ) : (
+                  <span className="text-slate-400">Not provided</span>
+                )}
+              </Field>
+              <Field label="Business address">
+                <address className="not-italic leading-relaxed">
+                  {app.address.line1}
+                  {app.address.line2 && <><br />{app.address.line2}</>}
+                  <br />
+                  {app.address.city}, {app.address.state} {app.address.postalCode}
+                  <br />
+                  {app.address.country}
+                </address>
+              </Field>
+              <Field label="Billing address">
+                {app.billing.sameAsBusiness ? (
+                  <span className="text-slate-500">Same as business address</span>
+                ) : (
+                  <address className="not-italic leading-relaxed">
+                    {app.billing.name && <><span className="font-medium">{app.billing.name}</span><br /></>}
+                    {app.billing.line1}
+                    {app.billing.line2 && <><br />{app.billing.line2}</>}
+                    <br />
+                    {app.billing.city}, {app.billing.state} {app.billing.postalCode}
+                    <br />
+                    {app.billing.country}
+                  </address>
+                )}
+              </Field>
+            </dl>
+          </Card>
 
-              <span
-                className={`text-xs font-bold px-3 py-1 rounded-full ${
-                  app.status === 'APPROVED'
-                    ? 'bg-emerald-100 text-emerald-800'
-                    : app.status === 'REJECTED'
-                    ? 'bg-red-100 text-red-800'
-                    : 'bg-amber-100 text-amber-800'
-                }`}
-              >
-                {app.status}
+          <Card
+            title="Compliance documents"
+            description="Open each file and verify it on the state portal before approving"
+            bodyClassName="p-0"
+            actions={
+              <span className={cx('text-xs font-semibold', docsHave === 3 ? 'text-emerald-700' : 'text-amber-700')}>
+                {docsHave}/3 required
               </span>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
-              <div>
-                <label className="text-xs font-bold uppercase text-slate-400 block mb-1">Contact Email</label>
-                <div className="text-sm font-semibold text-slate-800 flex items-center gap-1.5">
-                  <Mail className="w-4 h-4 text-slate-400" />
-                  <a href={`mailto:${app.email}`} className="text-[#123f28] hover:underline">
-                    {app.email}
-                  </a>
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs font-bold uppercase text-slate-400 block mb-1">Business Phone</label>
-                <div className="text-sm font-semibold text-slate-800 flex items-center gap-1.5">
-                  <Phone className="w-4 h-4 text-slate-400" />
-                  <span>{app.businessPhone || 'Not provided'}</span>
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs font-bold uppercase text-slate-400 block mb-1">Physical Business Address</label>
-                <div className="text-sm text-slate-700 leading-relaxed flex items-start gap-1.5">
-                  <MapPin className="w-4 h-4 text-slate-400 mt-0.5 flex-shrink-0" />
-                  <div>
-                    <p>{app.address.line1}</p>
-                    {app.address.line2 && <p>{app.address.line2}</p>}
-                    <p>
-                      {app.address.city}, {app.address.state} {app.address.postalCode}
-                    </p>
-                    <p>{app.address.country}</p>
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs font-bold uppercase text-slate-400 block mb-1">Billing Address</label>
-                <div className="text-sm text-slate-700 leading-relaxed">
-                  {app.billing.sameAsBusiness ? (
-                    <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded">
-                      Same as physical business address
-                    </span>
-                  ) : (
-                    <div>
-                      {app.billing.name && <p className="font-semibold">{app.billing.name}</p>}
-                      <p>{app.billing.line1}</p>
-                      {app.billing.line2 && <p>{app.billing.line2}</p>}
-                      <p>
-                        {app.billing.city}, {app.billing.state} {app.billing.postalCode}
-                      </p>
-                      <p>{app.billing.country}</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Shopify Info */}
-            {app.shopifyCustomerId && (
-              <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between text-xs">
-                <span className="text-slate-400">Shopify Customer ID:</span>
-                <span className="font-mono font-bold text-slate-800">{app.shopifyCustomerId}</span>
-              </div>
-            )}
-          </div>
-
-          {/* Submitted Document Files Section */}
-          <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
-            <h3 className="text-base font-bold text-slate-900 mb-4 flex items-center gap-2">
-              <FileText className="w-5 h-5 text-slate-400" />
-              <span>Compliance Documents &amp; Licenses</span>
-            </h3>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Tobacco License */}
-              <div className="p-4 rounded-lg border border-slate-200 bg-slate-50 flex items-start justify-between">
-                <div>
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500 block">Tobacco License</span>
-                  {app.documents?.tobaccoLicense ? (
-                    <div className="mt-1">
-                      <p className="text-xs font-semibold text-slate-800 truncate max-w-[200px]">
-                        {app.documents.tobaccoLicense.originalName}
-                      </p>
-                      <span className="text-[11px] text-slate-400">
-                        {(app.documents.tobaccoLicense.size / 1024).toFixed(1)} KB &bull; {app.documents.tobaccoLicense.mimetype}
-                      </span>
-                    </div>
-                  ) : (
-                    <p className="text-xs text-red-500 font-semibold mt-1">Not uploaded</p>
-                  )}
-                </div>
-
-                {app.documents?.tobaccoLicense && (
-                  <a
-                    href={`/api/admin/applications/documents/${app.documents.tobaccoLicense.filename}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 bg-[#123f28] text-white text-xs font-bold px-3 py-1.5 rounded hover:bg-[#0b2a1a] transition"
-                  >
-                    <Eye className="w-3.5 h-3.5" />
-                    <span>View</span>
-                  </a>
-                )}
-              </div>
-
-              {/* Sales Tax License */}
-              <div className="p-4 rounded-lg border border-slate-200 bg-slate-50 flex items-start justify-between">
-                <div>
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500 block">Resale Tax Certificate</span>
-                  {app.documents?.salesTaxLicense ? (
-                    <div className="mt-1">
-                      <p className="text-xs font-semibold text-slate-800 truncate max-w-[200px]">
-                        {app.documents.salesTaxLicense.originalName}
-                      </p>
-                      <span className="text-[11px] text-slate-400">
-                        {(app.documents.salesTaxLicense.size / 1024).toFixed(1)} KB &bull; {app.documents.salesTaxLicense.mimetype}
-                      </span>
-                    </div>
-                  ) : (
-                    <p className="text-xs text-red-500 font-semibold mt-1">Not uploaded</p>
-                  )}
-                </div>
-
-                {app.documents?.salesTaxLicense && (
-                  <a
-                    href={`/api/admin/applications/documents/${app.documents.salesTaxLicense.filename}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 bg-[#123f28] text-white text-xs font-bold px-3 py-1.5 rounded hover:bg-[#0b2a1a] transition"
-                  >
-                    <Eye className="w-3.5 h-3.5" />
-                    <span>View</span>
-                  </a>
-                )}
-              </div>
-
-              {/* FEIN Assignment */}
-              <div className="p-4 rounded-lg border border-slate-200 bg-slate-50 flex items-start justify-between">
-                <div>
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500 block">IRS EIN Letter</span>
-                  {app.documents?.feinForm ? (
-                    <div className="mt-1">
-                      <p className="text-xs font-semibold text-slate-800 truncate max-w-[200px]">
-                        {app.documents.feinForm.originalName}
-                      </p>
-                      <span className="text-[11px] text-slate-400">
-                        {(app.documents.feinForm.size / 1024).toFixed(1)} KB &bull; {app.documents.feinForm.mimetype}
-                      </span>
-                    </div>
-                  ) : (
-                    <p className="text-xs text-red-500 font-semibold mt-1">Not uploaded</p>
-                  )}
-                </div>
-
-                {app.documents?.feinForm && (
-                  <a
-                    href={`/api/admin/applications/documents/${app.documents.feinForm.filename}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 bg-[#123f28] text-white text-xs font-bold px-3 py-1.5 rounded hover:bg-[#0b2a1a] transition"
-                  >
-                    <Eye className="w-3.5 h-3.5" />
-                    <span>View</span>
-                  </a>
-                )}
-              </div>
-
-              {/* Optional Hemp License */}
-              <div className="p-4 rounded-lg border border-slate-200 bg-slate-50 flex items-start justify-between">
-                <div>
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500 block">Hemp Retailer License</span>
-                  {app.documents?.hempLicense ? (
-                    <div className="mt-1">
-                      <p className="text-xs font-semibold text-slate-800 truncate max-w-[200px]">
-                        {app.documents.hempLicense.originalName}
-                      </p>
-                      <span className="text-[11px] text-slate-400">
-                        {(app.documents.hempLicense.size / 1024).toFixed(1)} KB &bull; {app.documents.hempLicense.mimetype}
-                      </span>
-                    </div>
-                  ) : (
-                    <p className="text-xs text-slate-400 mt-1">Not required / omitted</p>
-                  )}
-                </div>
-
-                {app.documents?.hempLicense && (
-                  <a
-                    href={`/api/admin/applications/documents/${app.documents.hempLicense.filename}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 bg-[#123f28] text-white text-xs font-bold px-3 py-1.5 rounded hover:bg-[#0b2a1a] transition"
-                  >
-                    <Eye className="w-3.5 h-3.5" />
-                    <span>View</span>
-                  </a>
-                )}
-              </div>
-            </div>
-          </div>
+            }
+          >
+            <ul className="divide-y divide-slate-100">
+              <DocumentRow label="Tobacco license" doc={app.documents?.tobaccoLicense} />
+              <DocumentRow label="Resale tax certificate" doc={app.documents?.salesTaxLicense} />
+              <DocumentRow label="IRS EIN letter" doc={app.documents?.feinForm} />
+              <DocumentRow label="Hemp retailer license" doc={app.documents?.hempLicense} optional />
+            </ul>
+          </Card>
         </div>
 
-        {/* Right Column: Sales Rep Assignment & Internal Notes */}
+        {/* Side column */}
         <div className="space-y-6">
-          <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm space-y-4">
-            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-600">Account Management</h3>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Assigned Sales Representative</label>
-              <input
-                type="text"
-                value={assignedSalesRep}
-                onChange={(e) => setAssignedSalesRep(e.target.value)}
-                placeholder="e.g. John Doe (+1 267 902-1290)"
-                className="w-full text-sm p-2.5 border border-slate-200 rounded-lg focus:outline-none focus:border-[#123f28]"
-              />
+          <Card title="Account management" description="Only staff can see these fields">
+            <div className="space-y-4">
+              <div>
+                <label htmlFor="sales-rep" className="mb-1.5 block text-xs font-medium text-slate-600">
+                  Assigned sales representative
+                </label>
+                <input
+                  id="sales-rep"
+                  type="text"
+                  value={assignedSalesRep}
+                  onChange={(e) => setAssignedSalesRep(e.target.value)}
+                  placeholder="e.g. John Doe (+1 267 902-1290)"
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm placeholder:text-slate-400 focus:border-[#123f28] focus:outline-none focus:ring-1 focus:ring-[#123f28]"
+                />
+              </div>
+              <div>
+                <label htmlFor="admin-notes" className="mb-1.5 block text-xs font-medium text-slate-600">
+                  Internal compliance notes
+                </label>
+                <textarea
+                  id="admin-notes"
+                  rows={4}
+                  value={adminNotes}
+                  onChange={(e) => setAdminNotes(e.target.value)}
+                  placeholder="License verified on state portal, opening order expected…"
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm placeholder:text-slate-400 focus:border-[#123f28] focus:outline-none focus:ring-1 focus:ring-[#123f28]"
+                />
+              </div>
+              <Button onClick={handleSaveNotes} disabled={actionLoading} className="w-full">
+                <Save className="h-4 w-4" />
+                <span>Save changes</span>
+              </Button>
             </div>
+          </Card>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Internal Compliance Notes</label>
-              <textarea
-                rows={4}
-                value={adminNotes}
-                onChange={(e) => setAdminNotes(e.target.value)}
-                placeholder="License verified on state portal, opening order expected..."
-                className="w-full text-sm p-2.5 border border-slate-200 rounded-lg focus:outline-none focus:border-[#123f28]"
-              />
-            </div>
+          <Card title={<span className="inline-flex items-center gap-2"><History className="h-4 w-4 text-slate-400" />Activity</span>}>
+            <ol className="relative space-y-4 border-l border-slate-200 pl-5 text-sm">
+              <li>
+                <span className="absolute -left-[5px] mt-1.5 h-2.5 w-2.5 rounded-full bg-slate-300" />
+                <div className="font-medium text-slate-900">Application submitted</div>
+                <div className="text-xs text-slate-500">{formatDate(app.createdAt, true)}</div>
+              </li>
+              {app.reviewedAt && (
+                <li>
+                  <span
+                    className={cx(
+                      'absolute -left-[5px] mt-1.5 h-2.5 w-2.5 rounded-full',
+                      app.status === 'APPROVED' ? 'bg-emerald-500' : app.status === 'REJECTED' ? 'bg-red-500' : 'bg-sky-500'
+                    )}
+                  />
+                  <div className="font-medium text-slate-900">
+                    {app.status === 'APPROVED' ? 'Approved' : app.status === 'REJECTED' ? 'Rejected' : 'Reviewed'}
+                    {app.reviewedBy && <span className="font-normal text-slate-500"> by {app.reviewedBy}</span>}
+                  </div>
+                  <div className="text-xs text-slate-500">{formatDate(app.reviewedAt, true)}</div>
+                </li>
+              )}
+              {app.status === 'APPROVED' && app.shopifyCustomerId && (
+                <li>
+                  <span className="absolute -left-[5px] mt-1.5 h-2.5 w-2.5 rounded-full bg-[#123f28]" />
+                  <div className="inline-flex items-center gap-1.5 font-medium text-slate-900">
+                    <ShieldCheck className="h-4 w-4 text-[#123f28]" />
+                    Synced to Shopify
+                  </div>
+                  <div className="font-mono text-xs text-slate-500">Customer {app.shopifyCustomerId}</div>
+                </li>
+              )}
+            </ol>
+          </Card>
 
-            <button
-              onClick={handleSaveNotes}
-              disabled={actionLoading}
-              className="w-full bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold py-2.5 rounded-lg flex items-center justify-center gap-1.5 transition disabled:opacity-60"
-            >
-              <Save className="w-4 h-4" />
-              <span>Save Notes</span>
-            </button>
-          </div>
-
-          {/* Danger zone */}
-          <div className="bg-white rounded-xl border border-red-200 p-6 shadow-sm space-y-3">
-            <h3 className="text-sm font-bold uppercase tracking-wider text-red-700">Danger Zone</h3>
-            <p className="text-xs text-slate-500">
-              Permanently delete this account, its storefront login and uploaded documents.
-            </p>
-            <button
-              onClick={handleDelete}
-              disabled={actionLoading}
-              className="w-full bg-white border border-red-300 text-red-700 hover:bg-red-50 text-xs font-bold py-2.5 rounded-lg flex items-center justify-center gap-1.5 transition disabled:opacity-60"
-            >
-              <Trash2 className="w-4 h-4" />
-              <span>Delete Account</span>
-            </button>
-          </div>
-
-          {/* Audit trail */}
-          <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm text-xs text-slate-500 space-y-2">
-            <h4 className="font-bold text-slate-700 uppercase tracking-wider">Audit Log</h4>
-            <p>
-              <strong>Submitted:</strong> {new Date(app.createdAt).toLocaleString()}
-            </p>
-            {app.reviewedBy && (
-              <p>
-                <strong>Reviewed By:</strong> {app.reviewedBy}
-              </p>
-            )}
-            {app.reviewedAt && (
-              <p>
-                <strong>Reviewed On:</strong> {new Date(app.reviewedAt).toLocaleString()}
-              </p>
-            )}
-            {app.rejectionReason && (
-              <p className="text-red-600">
-                <strong>Rejection Reason:</strong> {app.rejectionReason}
-              </p>
-            )}
-          </div>
+          <Card title={<span className="text-red-700">Danger zone</span>} className="border-red-200">
+            <p className="text-sm text-slate-500">Permanently delete this account, its storefront login and uploaded documents.</p>
+            <Button variant="danger" onClick={handleDelete} disabled={actionLoading} className="mt-4 w-full">
+              <Trash2 className="h-4 w-4" />
+              <span>Delete account</span>
+            </Button>
+          </Card>
         </div>
       </div>
 
-      {/* Rejection Modal */}
+      {/* Rejection modal */}
       {showRejectModal && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-2xl">
-            <h3 className="text-lg font-bold text-slate-900 mb-2">Reject / Request More Info</h3>
-            <p className="text-xs text-slate-500 mb-4">
-              Enter the reason below. An email will automatically be sent to the applicant with this explanation.
-            </p>
-
-            <form onSubmit={handleRejectSubmit} className="space-y-4">
-              <textarea
-                rows={4}
-                value={rejectReason}
-                onChange={(e) => setRejectReason(e.target.value)}
-                placeholder="e.g. Your Pennsylvania Tobacco License appears to be expired. Please reply with your updated 2026 renewal certificate."
-                required
-                className="w-full text-sm p-3 border border-slate-200 rounded-lg focus:outline-none focus:border-red-500"
-              />
-
-              <div className="flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowRejectModal(false)}
-                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg"
-                >
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" role="dialog" aria-modal="true" aria-labelledby="reject-title">
+          <div className="w-full max-w-md rounded-lg bg-white shadow-2xl">
+            <div className="border-b border-slate-100 px-6 py-4">
+              <h3 id="reject-title" className="text-base font-semibold text-slate-900">
+                Reject or request more info
+              </h3>
+              <p className="mt-1 text-sm text-slate-500">The applicant is emailed this explanation automatically.</p>
+            </div>
+            <form onSubmit={handleRejectSubmit}>
+              <div className="px-6 py-4">
+                <textarea
+                  rows={5}
+                  value={rejectReason}
+                  onChange={(e) => setRejectReason(e.target.value)}
+                  placeholder="e.g. Your Pennsylvania Tobacco License appears to be expired. Please reply with your updated 2026 renewal certificate."
+                  required
+                  autoFocus
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm placeholder:text-slate-400 focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500"
+                />
+              </div>
+              <div className="flex items-center justify-end gap-2 rounded-b-lg border-t border-slate-100 bg-slate-50 px-6 py-3">
+                <Button type="button" variant="ghost" onClick={() => setShowRejectModal(false)}>
                   Cancel
-                </button>
+                </Button>
                 <button
                   type="submit"
                   disabled={actionLoading}
-                  className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 text-xs font-bold rounded-lg shadow-sm"
+                  className="inline-flex items-center gap-1.5 rounded-md bg-red-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700 disabled:opacity-60"
                 >
-                  Confirm Rejection &amp; Email
+                  {actionLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+                  Reject &amp; email applicant
                 </button>
               </div>
             </form>
