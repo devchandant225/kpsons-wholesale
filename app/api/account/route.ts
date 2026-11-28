@@ -1,8 +1,7 @@
 import { NextRequest } from 'next/server';
-import { verifyToken } from '@/lib/auth';
 import { handleOptions, jsonResponse } from '@/lib/cors';
-import { prisma } from '@/lib/db';
-import { isValidId } from '@/lib/admin-auth';
+import { getApprovedBuyer } from '@/lib/buyer-session';
+import { listBuyerOrders, orderErrorMessage, OrderSummary } from '@/lib/shopify-orders';
 
 export async function OPTIONS(request: NextRequest) {
   return handleOptions(request);
@@ -11,29 +10,20 @@ export async function OPTIONS(request: NextRequest) {
 export async function GET(request: NextRequest) {
   const origin = request.headers.get('origin');
 
-  let token = '';
-  const authHeader = request.headers.get('authorization');
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    token = authHeader.substring(7).trim();
-  } else {
-    token = request.cookies.get('wsp_session_token')?.value || '';
-  }
-
-  if (!token) {
-    return jsonResponse({ loggedIn: false }, 401, origin);
-  }
-
-  const payload = verifyToken(token);
-  if (!payload || !payload.id || !isValidId(payload.id)) {
-    return jsonResponse({ loggedIn: false }, 401, origin);
-  }
-
   try {
-    const app = await prisma.wholesaleApplication.findUnique({ where: { id: payload.id } });
-
-    // Same rule as /api/session: only approved accounts count as logged in.
-    if (!app || app.status !== 'APPROVED') {
+    // Only approved accounts count as logged in (same rule as /api/session).
+    const app = await getApprovedBuyer(request);
+    if (!app) {
       return jsonResponse({ loggedIn: false }, 401, origin);
+    }
+
+    let orders: OrderSummary[] = [];
+    let orderError = '';
+    try {
+      orders = await listBuyerOrders({ email: app.email, shopifyCustomerId: app.shopifyCustomerId });
+    } catch (error) {
+      console.error('Order history lookup error:', error);
+      orderError = orderErrorMessage(error);
     }
 
     return jsonResponse(
@@ -42,8 +32,8 @@ export async function GET(request: NextRequest) {
         // Top-level fields read by the theme's wholesale-account section.
         email: app.email,
         businessName: app.businessName,
-        // Order history isn't wired up yet; the theme shows "no orders".
-        orders: [],
+        orders,
+        orderError,
         account: {
           id: app.id,
           email: app.email,

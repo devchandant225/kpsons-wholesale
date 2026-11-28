@@ -6,7 +6,7 @@ import crypto from 'crypto';
  * grant isn't allowed. The resulting offline token is stored in Postgres.
  */
 export const SHOPIFY_STORE_DOMAIN = process.env.SHOPIFY_STORE_DOMAIN || 'ujwt36-mq.myshopify.com';
-export const SHOPIFY_SCOPES = process.env.SHOPIFY_SCOPES || 'read_customers,write_customers';
+export const SHOPIFY_SCOPES = process.env.SHOPIFY_SCOPES || 'read_customers,write_customers,read_orders';
 export const OAUTH_STATE_COOKIE = 'kp_shopify_oauth_state';
 
 export function redirectUri(): string {

@@ -115,7 +115,7 @@ Fill in:
 - `DATABASE_URL`: Your Postgres connection string.
 - `JWT_SECRET`: Random 32+ character string.
 - `SHOPIFY_STORE_DOMAIN`: `ujwt36-mq.myshopify.com`
-- `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET`: from a Dev Dashboard app (dev.shopify.com) installed on the store with `read_customers` and `write_customers` scopes. The app gets and renews its access token itself. (A legacy `SHOPIFY_ADMIN_ACCESS_TOKEN` also still works.)
+- `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET`: from a Dev Dashboard app (dev.shopify.com) installed on the store with `read_customers`, `write_customers` and `read_orders` scopes (`read_orders` powers order history and printable invoices; add `read_all_orders` to show orders older than 60 days). The app gets and renews its access token itself. (A legacy `SHOPIFY_ADMIN_ACCESS_TOKEN` also still works.)
 - `RESEND_API_KEY`, `EMAIL_FROM`: Resend API key and a From address on a domain verified in Resend (emails are skipped if the key is blank).
 
 ### 3. Install & Seed Initial Staff User

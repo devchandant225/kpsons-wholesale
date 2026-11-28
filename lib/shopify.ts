@@ -102,7 +102,7 @@ async function getAuth(forceRefresh = false): Promise<Auth> {
   return { token: await getClientCredentialsToken(forceRefresh), kind: 'client_credentials' };
 }
 
-async function shopifyFetch(p: string, init: RequestInit = {}) {
+export async function shopifyFetch(p: string, init: RequestInit = {}) {
   const send = async (token: string) =>
     fetch(apiUrl(p), {
       ...init,
@@ -207,7 +207,9 @@ async function findCustomerIdByEmail(email: string): Promise<string | null> {
   const { res, data } = await shopifyFetch(
     `customers/search.json?query=${encodeURIComponent(`email:"${email}"`)}&fields=id,email`
   );
-  if (!res.ok) throw new Error(`Shopify customer search failed (${res.status})`);
+  if (!res.ok) {
+    throw new Error(`Shopify customer search failed (${res.status}): ${JSON.stringify(data.errors || data).slice(0, 300)}`);
+  }
   const match = (data.customers || []).find(
     (c: { email?: string }) => (c.email || '').toLowerCase() === email.toLowerCase()
   );
